@@ -534,10 +534,28 @@ function verdictCard(v, meta) {
     <p>${esc(v.gerekce || '')}</p>
     <div class="levels mono"><div><span>Zarar-kes</span>${num(v.zarar_kes)}</div><div><span>Hedef</span>${num(v.hedef)}</div>
       <div><span>Analist puanı</span>${v.analist_puani != null ? esc(v.analist_puani) + '/10' : '—'}</div></div>
-    <p class="small-text ${v.analist_tutarli === false ? 'down' : 'muted'}">${v.analist_tutarli === false ? 'Hakem, analistin yorumunu verilerle tam tutarlı bulmadı.' : 'Hakem, analistin yorumunu verilerle tutarlı buldu.'}</p>
+    ${v.analist_tutarli == null ? '' : `<p class="small-text ${v.analist_tutarli === false ? 'down' : 'muted'}">${v.analist_tutarli === false ? 'Hakem, analistin yorumunu verilerle tam tutarlı bulmadı.' : 'Hakem, analistin yorumunu verilerle tutarlı buldu.'}</p>`}
     ${Array.isArray(v.sorunlar) && v.sorunlar.length ? `<ul class="small-text">${v.sorunlar.slice(0, 5).map(s => `<li>${esc(s)}</li>`).join('')}</ul>` : ''}
     <p class="muted small-text">Hakem: ${esc(meta)}</p>
   </div>`;
+}
+
+// Hakem model yanıt vermezse: sitenin kendi skorundan, hakem kurallarıyla aynı mantıkta yedek karar.
+function ruleVerdict() {
+  const sig = state.lastSignal || TA.signal(state.candles, TA.computeAll(state.candles));
+  let karar = sig.cls === 'buy' ? 'AL' : sig.cls === 'sell' ? 'SAT' : 'BEKLE';
+  const sorunlar = [];
+  const mtf = Object.entries(state.mtf || {});
+  const opp = mtf.filter(([, x]) => karar === 'AL' ? /SAT/.test(x.label) : karar === 'SAT' ? /AL/.test(x.label) : false);
+  if (opp.length) { sorunlar.push(`Ters yönde zaman dilimi: ${opp.map(([k, x]) => `${k} ${x.label}`).join(', ')}`); karar = 'BEKLE'; }
+  if (karar === 'AL' && sig.regime === 'down') { sorunlar.push('Fiyat ana düşüş trendinde.'); karar = 'BEKLE'; }
+  const guven = karar === 'BEKLE' ? Math.min(60, 30 + sorunlar.length * 10) : Math.min(70, Math.round(Math.abs(sig.score)));
+  return {
+    karar, guven, analist_tutarli: null, analist_puani: null, sorunlar,
+    gerekce: `Kural tabanlı skor ${Math.round(sig.score)} (${sig.label}), rejim: ${sig.regime === 'up' ? 'yükseliş' : sig.regime === 'down' ? 'düşüş' : 'yatay'}.` + (karar !== (sig.cls === 'buy' ? 'AL' : sig.cls === 'sell' ? 'SAT' : 'BEKLE') ? ' Çelişki olduğu için BEKLE.' : ''),
+    zarar_kes: karar !== 'BEKLE' && sig.levels ? sig.levels.stop : null,
+    hedef: karar !== 'BEKLE' && sig.levels ? sig.levels.target : null,
+  };
 }
 
 async function runAI() {
@@ -553,13 +571,21 @@ async function runAI() {
     const a = await complete(cfg, AI_SYSTEM, 'Şu verileri yorumla:\n' + data);
     const analystHtml = `<h3 class="mini-h">Analist yorumu</h3>${md(a.text)}<p class="muted small-text">${esc(label(a))}</p>`;
     out.innerHTML = analystHtml + '<p><span class="spinner"></span>2/2 · Hakem model yorumu verilerle karşılaştırıyor…</p>';
-    // Hakem mümkünse analistten farklı bir sağlayıcı olsun
-    const j = await complete(cfg, JUDGE_SYSTEM, `Ham veri:\n${data}\n\nAnalistin yorumu:\n<<<\n${a.text}\n>>>`, { json: true, exclude: a.provider });
-    const v = parseJSON(j.text);
-    const same = j.provider === a.provider && j.model === a.model;
-    const judgeHtml = v && v.karar
-      ? verdictCard(v, label(j) + (same ? ' (analistle aynı model; ikinci bir sağlayıcı anahtarı eklerseniz bağımsız hakem kullanılır)' : ''))
-      : '<p class="err">Hakem geçerli bir karar döndürmedi.</p>';
+    // Hakem mümkünse analistten farklı bir sağlayıcı olsun. Anahtarsız uç nokta art arda isteklerde yoğunlaşıyor; kısa bekle.
+    if (a.provider === 'pollinations') await new Promise(r => setTimeout(r, 4000));
+    let j = null, v = null;
+    try {
+      j = await complete(cfg, JUDGE_SYSTEM + '\nYanıtın { ile başlayıp } ile bitsin; kod bloğu ya da açıklama ekleme.', `Ham veri:\n${data}\n\nAnalistin yorumu:\n<<<\n${a.text}\n>>>`, { json: true, exclude: a.provider });
+      v = parseJSON(j.text);
+      if (v && typeof v.karar === 'string') v.karar = v.karar.toLocaleUpperCase('tr-TR').trim();
+    } catch (e) { console.warn('Hakem:', e.message); }
+    let judgeHtml;
+    if (v && v.karar) {
+      const same = j.provider === a.provider && j.model === a.model;
+      judgeHtml = verdictCard(v, label(j) + (same ? ' (analistle aynı model; ikinci bir sağlayıcı anahtarı eklerseniz bağımsız hakem kullanılır)' : ''));
+    } else {
+      judgeHtml = verdictCard(ruleVerdict(), 'Hakem model şu an yanıt vermedi; bu karar sitenin kural tabanlı skorundan üretildi. Daha tutarlı hakem için ayarlardan ücretsiz bir Gemini anahtarı ekleyin.');
+    }
     out.innerHTML = `<h3 class="mini-h">Hakem kararı</h3>${judgeHtml}${analystHtml}<p class="muted small-text">${new Date().toLocaleTimeString('tr-TR')} · Yatırım tavsiyesi değildir.</p>`;
   } catch (e) {
     out.innerHTML = `<p class="err">Yapay zeka yanıt veremedi: ${esc(e.message || String(e))}</p><p class="small-text"><a href="#" class="ai-setup">Ayarlardan</a> ücretsiz bir Gemini ya da Groq anahtarı ekleyip tekrar deneyin.</p>`;
