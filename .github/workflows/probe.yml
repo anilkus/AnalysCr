@@ -1,0 +1,16 @@
+name: Probe keyless LLM
+on:
+  push:
+    paths: ['.github/workflows/probe.yml']
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          B='{"model":"MODEL","messages":[{"role":"user","content":"Merhaba, tek kelimeyle cevap ver: 2+2?"}]}'
+          for m in openai openai-fast mistral gemini qwen-coder llama; do
+            echo "== text.pollinations.ai/openai $m"; curl -s -m 30 -w ' [%{http_code}]\n' -H 'content-type: application/json' -H 'Origin: https://anilkus.github.io' -d "${B/MODEL/$m}" https://text.pollinations.ai/openai | head -c 300; echo
+          done
+          echo "== GET prompt"; curl -s -m 30 -w ' [%{http_code}]\n' -H 'Origin: https://anilkus.github.io' "https://text.pollinations.ai/2%2B2%3F" | head -c 300; echo
+          echo "== gen.pollinations.ai"; curl -s -m 30 -w ' [%{http_code}]\n' -H 'content-type: application/json' -d "${B/MODEL/openai}" https://gen.pollinations.ai/v1/chat/completions | head -c 300; echo
+          echo "== referrer"; curl -s -m 30 -w ' [%{http_code}]\n' -H 'content-type: application/json' -H 'Referer: https://anilkus.github.io/AnalysCr/' -d '{"model":"openai","referrer":"anilkus.github.io","messages":[{"role":"user","content":"2+2?"}]}' https://text.pollinations.ai/openai | head -c 300; echo
