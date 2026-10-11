@@ -1,0 +1,17 @@
+name: Smoke test
+on:
+  workflow_dispatch:
+  push:
+    paths: ['tools/smoke.mjs', '.github/workflows/smoke.yml']
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm i --no-save playwright-core@1.48.2 && sed -i "s/from 'playwright'/from 'playwright-core'/" tools/smoke.mjs
+      - run: node tools/smoke.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: smoke, path: smoke.png }

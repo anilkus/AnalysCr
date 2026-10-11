@@ -1,0 +1,26 @@
+// Canlı siteyi gerçek tarayıcıda açıp veri, sinyal, backtest ve anahtarsız AI'yı kontrol eder.
+import { chromium } from 'playwright';
+const URL = process.env.SITE || 'https://anilkus.github.io/AnalysCr/';
+const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome' });
+const page = await b.newPage({ viewport: { width: 1280, height: 900 } });
+const errs = [];
+page.on('pageerror', e => errs.push('pageerror: ' + e.message));
+page.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
+const t = async s => (await page.textContent(s).catch(() => '')).replace(/\s+/g, ' ').trim();
+await page.goto(URL, { waitUntil: 'networkidle' });
+await page.waitForTimeout(6000);
+console.log('BAĞLANTI:', await t('#conn'));
+console.log('COIN SAYISI:', await page.locator('#coinList li.item').count());
+console.log('FİYAT:', await t('#symTitle'), await t('#price'), await t('#change'));
+console.log('SİNYAL:', await t('#signalBadge'));
+console.log('ZAMAN DİLİMİ:', await t('#mtf'));
+console.log('DESTEK/DİRENÇ:', await t('#supList'), '|', await t('#resList'));
+await page.click('#btBtn');
+await page.waitForSelector('.bt-grid', { timeout: 60000 }).catch(() => {});
+console.log('BACKTEST:', (await t('#btOut')).slice(0, 300));
+await page.click('#aiBtn');
+await page.waitForFunction(() => !document.querySelector('#aiOut').dataset.busy, null, { timeout: 180000 }).catch(() => console.log('AI zaman aşımı'));
+console.log('AI:', (await t('#aiOut')).slice(0, 1500));
+await page.screenshot({ path: 'smoke.png', fullPage: true });
+console.log('HATALAR:', errs.length ? errs.join('\n') : 'yok');
+await b.close();
