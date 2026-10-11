@@ -1,0 +1,21 @@
+name: Fetch history
+on:
+  workflow_dispatch:
+  push:
+    paths: ['tools/fetch-history.mjs', '.github/workflows/fetch-history.yml']
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node tools/fetch-history.mjs
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add data
+          git commit -m "Update backtest history data" || echo "no changes"
+          git push
