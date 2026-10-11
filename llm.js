@@ -24,7 +24,7 @@ export const PROVIDERS = {
   },
   pollinations: {
     name: 'Pollinations (anahtarsız)', free: true, needsKey: false,
-    models: ['openai', 'mistral'],
+    models: ['openai'],
     keyUrl: 'https://pollinations.ai',
   },
 };
@@ -73,7 +73,15 @@ const CALLERS = {
   },
   groq: (key, model, s, u, json) => openaiCompat('https://api.groq.com/openai/v1/chat/completions', key, model, s, u, json),
   openrouter: (key, model, s, u, json) => openaiCompat('https://openrouter.ai/api/v1/chat/completions', key, model, s, u, json),
-  pollinations: (key, model, s, u, json) => openaiCompat('https://text.pollinations.ai/openai', null, model, s, u, json),
+  // Anahtarsız uç nokta yoğunlukta 402 dönebiliyor; birkaç kez bekleyip tekrar dene. JSON modu orada daha sık reddediliyor.
+  async pollinations(key, model, s, u) {
+    let last;
+    for (let i = 0; i < 4; i++) {
+      try { return await openaiCompat('https://text.pollinations.ai/openai', null, model, s, u, false); }
+      catch (e) { last = e; if (e.status !== 402 && e.status !== 429) throw e; await new Promise(r => setTimeout(r, 3000 + i * 3000)); }
+    }
+    throw new LLMError('Anahtarsız ücretsiz model şu an yoğun (402). Biraz sonra tekrar deneyin ya da ücretsiz bir Gemini anahtarı ekleyin.', last?.status, false);
+  },
   async claude(key, model, system, user) {
     const { default: Anthropic } = await import('https://esm.sh/@anthropic-ai/sdk@0.127.0');
     const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
