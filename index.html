@@ -19,7 +19,6 @@
     <div class="top-actions">
       <span id="conn" class="conn" title="Canlı veri bağlantısı">bağlanıyor…</span>
       <button id="themeBtn" class="icon-btn" title="Tema">◐</button>
-      <button id="settingsBtn" class="btn ghost">⚙ AI Ayarları</button>
     </div>
   </div>
 </header>
@@ -67,6 +66,8 @@
         <span><i style="background:var(--ema50)"></i>EMA50</span>
         <span><i style="background:var(--ema200)"></i>EMA200</span>
         <span><i style="background:var(--bb)"></i>Bollinger</span>
+        <span><i style="background:var(--up)"></i>Destek</span>
+        <span><i style="background:var(--down)"></i>Direnç</span>
       </div>
       <div id="chart" class="chart"></div>
       <div class="sub-label">RSI (14)</div>
@@ -80,22 +81,30 @@
         <h2>Teknik Sinyal</h2>
         <div class="signal-top">
           <div id="signalBadge" class="badge neutral">—</div>
-          <div class="gauge"><div class="gauge-bar"><div id="gaugeFill" class="gauge-fill"></div><div id="gaugeMark" class="gauge-mark"></div></div>
-            <div class="gauge-labels"><span>Güçlü Sat</span><span>Nötr</span><span>Güçlü Al</span></div></div>
+          <div class="gauge"><div class="gauge-bar"><div id="gaugeMark" class="gauge-mark"></div></div>
+            <div class="gauge-labels"><span>Güçlü Sat</span><span>Bekle</span><span>Güçlü Al</span></div></div>
         </div>
         <div class="levels mono" id="levels"></div>
-        <ul id="reasons" class="reasons"></ul>
+        <h3 class="mini-h">Zaman dilimi uyumu</h3>
+        <div class="mtf" id="mtf"></div>
+        <p class="muted small-text" id="mtfNote"></p>
       </div>
 
-      <div class="panel ai-panel">
-        <div class="ai-head">
-          <h2>Yapay Zeka Yorumu</h2>
-          <button id="aiBtn" class="btn">Yorumla</button>
+      <div class="panel">
+        <h2>Destek / Direnç ve Fibonacci</h2>
+        <div class="sr-grid">
+          <div><h3 class="mini-h">Direnç</h3><ul id="resList" class="lvl-list"></ul></div>
+          <div><h3 class="mini-h">Destek</h3><ul id="supList" class="lvl-list"></ul></div>
         </div>
-        <div id="aiOut" class="ai-out muted">
-          Göstergeler ve son mumlar Claude'a gönderilir, Türkçe yorum döner. Önce <a href="#" id="aiSetupLink">AI Ayarları</a>'ndan kendi API anahtarınızı girin.
-        </div>
+        <h3 class="mini-h" id="fibTitle">Fibonacci</h3>
+        <ul id="fibList" class="lvl-list fib"></ul>
       </div>
+    </div>
+
+    <div class="panel">
+      <h2>Bu sinyal neden çıktı?</h2>
+      <p class="muted small-text">En yaygın kullanılan teknik analiz yöntemleri tek tek değerlendirilip ağırlıklı bir skora çevrilir. <span class="up">+</span> alış, <span class="down">−</span> satış yönünde puan, · bilgi amaçlı. Grup puanları toplanıp −100…+100 aralığına ölçeklenir.</p>
+      <div id="reasons" class="reason-groups"></div>
     </div>
 
     <div class="panel">
@@ -106,16 +115,24 @@
       <p class="muted small-text">Hacimce ilk 20 coin seçili zaman diliminde taranır. Satıra tıklayınca grafiği açılır.</p>
       <div class="table-wrap">
         <table class="scan">
-          <thead><tr><th>Coin</th><th>Fiyat</th><th>24s</th><th>RSI</th><th>Skor</th><th>Sinyal</th></tr></thead>
-          <tbody id="scanBody"><tr><td colspan="6" class="muted">Henüz tarama yapılmadı.</td></tr></tbody>
+          <thead><tr><th>Coin</th><th>Fiyat</th><th>24s</th><th>RSI</th><th>ADX</th><th>Skor</th><th>Sinyal</th></tr></thead>
+          <tbody id="scanBody"><tr><td colspan="7" class="muted">Henüz tarama yapılmadı.</td></tr></tbody>
         </table>
       </div>
     </div>
+    <details class="panel ai-details" id="aiDetails">
+      <summary><h2>Yapay zeka yorumu <span class="muted small-text">(isteğe bağlı, kendi Claude API anahtarınla)</span></h2></summary>
+      <div class="ai-head" style="margin-top:12px">
+        <button id="settingsBtn" class="btn ghost">⚙ Anahtar ayarları</button>
+        <button id="aiBtn" class="btn">Yorumla</button>
+      </div>
+      <div id="aiOut" class="ai-out muted"></div>
+    </details>
   </section>
 </main>
 
 <footer class="wrap foot muted">
-  Veri: Binance açık API (anahtarsız). Göstergeler tarayıcınızda hesaplanır. AI yorumu: Anthropic Claude (kendi anahtarınızla).
+  Veri: Binance açık API (anahtarsız). Tüm analizler tarayıcınızda hesaplanır, anahtar veya üyelik gerekmez.
   · <a href="/">anilkus.github.io</a>
 </footer>
 

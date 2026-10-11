@@ -21,6 +21,7 @@ const state = {
   tab: 'all',
   favs: new Set(JSON.parse(safeGet('ks.favs') || '["BTCUSDT","ETHUSDT","SOLUSDT"]')),
   lastSignal: null,
+  mtf: {},
 };
 
 function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -165,8 +166,22 @@ function renderChart(fit) {
 }
 
 // ---------- Sinyal paneli ----------
+const IV_LABEL = { '15m': '15dk', '1h': '1 saat', '4h': '4 saat', '1d': '1 gün' };
+const GROUPS = ['Trend', 'Momentum', 'Yapı', 'Formasyon', 'Volatilite', 'Hacim'];
+let srLines = [];
+
+function drawLevelLines(sig) {
+  const s = charts.s.candle;
+  srLines.forEach(l => s.removePriceLine(l));
+  srLines = [
+    ...sig.sr.supports.slice(0, 2).map(l => s.createPriceLine({ price: l.price, color: css('--up'), lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: 'D' })),
+    ...sig.sr.resistances.slice(0, 2).map(l => s.createPriceLine({ price: l.price, color: css('--down'), lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: 'R' })),
+  ];
+}
+
 function renderSignal(sig) {
   state.lastSignal = sig;
+  state.mtf[state.interval] = sig;
   const b = $('#signalBadge');
   b.textContent = `${sig.label}  ${sig.score > 0 ? '+' : ''}${sig.score}`;
   b.className = 'badge ' + sig.cls;
@@ -174,10 +189,53 @@ function renderSignal(sig) {
   const lv = sig.levels;
   $('#levels').innerHTML = `
     <div><span>Son fiyat</span>${fmtPrice(sig.price)}</div>
-    <div><span>Zarar-kes (1.5×ATR)</span>${lv ? fmtPrice(lv.stop) : '—'}</div>
-    <div><span>Hedef (2.5×ATR)</span>${lv ? fmtPrice(lv.target) : '—'}</div>`;
-  $('#reasons').innerHTML = sig.reasons.map(r =>
-    `<li class="${r.w > 0 ? 'pos' : r.w < 0 ? 'neg' : 'neu'}">${esc(r.text)}</li>`).join('');
+    <div><span>Zarar-kes</span>${lv ? fmtPrice(lv.stop) : '—'}</div>
+    <div><span>Hedef${lv ? ` · R/R ${lv.rr.toFixed(1)}` : ''}</span>${lv ? fmtPrice(lv.target) : '—'}</div>`;
+
+  $('#reasons').innerHTML = GROUPS.map(g => {
+    const rs = sig.reasons.filter(r => r.group === g);
+    if (!rs.length) return '';
+    const pts = rs.reduce((a, r) => a + r.pts, 0);
+    return `<div class="rg"><h3>${g}<span class="pts ${pts >= 0.5 ? 'up' : pts <= -0.5 ? 'down' : 'muted'}">${pts > 0 ? '+' : ''}${Math.round(pts)} puan</span></h3>
+      <ul class="reasons">${rs.map(r => `<li class="${r.w > 0 ? 'pos' : r.w < 0 ? 'neg' : 'neu'}">${esc(r.text)}</li>`).join('')}</ul></div>`;
+  }).join('');
+
+  const near = l => sig.atr && Math.abs(l.price - sig.price) < sig.atr * 0.8 ? 'near' : '';
+  const lvl = (arr, empty) => arr.length ? arr.map(l => `<li class="${near(l)}"><span>${l.touches} dokunuş</span><span>${fmtPrice(l.price)}</span></li>`).join('') : `<li class="muted"><span>${empty}</span><span></span></li>`;
+  $('#resList').innerHTML = lvl(sig.sr.resistances, 'Yakında direnç yok (zirve bölgesi)');
+  $('#supList').innerHTML = lvl(sig.sr.supports, 'Yakında destek yok');
+  const f = sig.fib;
+  $('#fibTitle').textContent = `Fibonacci · son ${f.up ? 'yükseliş' : 'düşüş'} salınımı (${fmtPrice(f.low)} → ${fmtPrice(f.high)})`;
+  $('#fibList').innerHTML = f.levels.map(l => `<li class="${near(l)} ${l.ratio === 0.5 || l.ratio === 0.618 ? 'key' : ''}"><span>%${(l.ratio * 100).toFixed(1)}</span><span>${fmtPrice(l.price)}</span></li>`).join('');
+
+  drawLevelLines(sig);
+  renderMTF();
+}
+
+function renderMTF() {
+  const ivs = Object.keys(IV_LABEL);
+  $('#mtf').innerHTML = ivs.map(iv => {
+    const s = state.mtf[iv];
+    return `<div data-iv="${iv}" class="${s ? s.cls : ''} ${iv === state.interval ? 'cur' : ''}" title="${IV_LABEL[iv]} grafiğini aç"><span>${IV_LABEL[iv]}</span><b>${s ? s.label : '…'}</b>${s ? ` <small class="mono">${s.score > 0 ? '+' : ''}${s.score}</small>` : ''}</div>`;
+  }).join('');
+  const got = ivs.map(iv => state.mtf[iv]).filter(Boolean);
+  const buys = got.filter(s => s.cls === 'buy').length, sells = got.filter(s => s.cls === 'sell').length;
+  $('#mtfNote').textContent = got.length < ivs.length ? '' :
+    buys >= 3 ? 'Zaman dilimlerinin çoğu AL yönünde: sinyal daha güvenilir.' :
+    sells >= 3 ? 'Zaman dilimlerinin çoğu SAT yönünde: sinyal daha güvenilir.' :
+    'Zaman dilimleri çelişiyor: temkinli olun, büyük zaman dilimi (1 gün / 4 saat) trendi daha belirleyicidir.';
+}
+
+async function loadMTF(sym) {
+  for (const iv of Object.keys(IV_LABEL)) {
+    if (iv === state.interval) continue;
+    try {
+      const c = await loadCandles(sym, iv, 300);
+      if (sym !== state.symbol) return;
+      state.mtf[iv] = TA.signal(c);
+      renderMTF();
+    } catch { /* atla */ }
+  }
 }
 
 // ---------- Başlık ----------
@@ -257,6 +315,7 @@ function throttledRender() {
 // ---------- Seçim ----------
 let loadToken = 0;
 async function selectSymbol(sym, interval = state.interval) {
+  if (sym !== state.symbol) state.mtf = {};
   state.symbol = sym; state.interval = interval;
   safeSet('ks.symbol', sym); safeSet('ks.interval', interval);
   document.querySelectorAll('#intervalTabs button').forEach(b => b.classList.toggle('active', b.dataset.iv === interval));
@@ -268,6 +327,7 @@ async function selectSymbol(sym, interval = state.interval) {
     state.candles = c;
     renderChart(true);
     openSocket();
+    loadMTF(sym);
   } catch (e) {
     console.error(e);
     setConn('veri alınamadı', 'err');
@@ -282,7 +342,7 @@ async function runScan() {
   btn.disabled = true; btn.textContent = 'Taranıyor…';
   const list = state.tickers.slice(0, 20);
   const body = $('#scanBody');
-  body.innerHTML = `<tr><td colspan="6" class="muted"><span class="spinner"></span>0 / ${list.length}</td></tr>`;
+  body.innerHTML = `<tr><td colspan="7" class="muted"><span class="spinner"></span>0 / ${list.length}</td></tr>`;
   const rows = [];
   let done = 0;
   const queue = [...list];
@@ -295,7 +355,7 @@ async function runScan() {
         rows.push({ t, sig: TA.signal(c) });
       } catch { /* atla */ }
       done++;
-      if (rows.length < list.length) body.innerHTML = `<tr><td colspan="6" class="muted"><span class="spinner"></span>${done} / ${list.length}</td></tr>`;
+      if (rows.length < list.length) body.innerHTML = `<tr><td colspan="7" class="muted"><span class="spinner"></span>${done} / ${list.length}</td></tr>`;
       if (state.source === 'coingecko') await new Promise(r => setTimeout(r, 2500)); // ücretsiz limit
     }
   }
@@ -307,15 +367,16 @@ async function runScan() {
       <td class="mono">${fmtPrice(sig.price)}</td>
       <td class="mono ${t.change >= 0 ? 'up' : 'down'}">${fmtPct(t.change)}</td>
       <td class="mono">${sig.rsi != null ? sig.rsi.toFixed(0) : '—'}</td>
+      <td class="mono">${sig.adx != null ? sig.adx.toFixed(0) : '—'}</td>
       <td class="mono">${sig.score > 0 ? '+' : ''}${sig.score}</td>
       <td><span class="pill ${sig.cls}">${sig.label}</span></td>
-    </tr>`).join('') || '<tr><td colspan="6" class="muted">Veri alınamadı.</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">Veri alınamadı.</td></tr>';
   btn.disabled = false; btn.textContent = 'Yeniden tara';
 }
 
 // ---------- Yapay zeka yorumu ----------
 const AI_SYSTEM = `Sen deneyimli bir kripto para teknik analistisin. Kullanıcıya Türkçe, sade ve dürüst bir piyasa yorumu yaz.
-Sana bir coinin güncel fiyatı, hesaplanmış göstergeler (EMA, RSI, MACD, Bollinger, ATR), kural tabanlı sinyal skoru ve son mumlar JSON olarak verilecek.
+Sana bir coinin güncel fiyatı, hesaplanmış göstergeler (EMA, RSI, Stoch RSI, MACD, ADX, Bollinger, ATR), destek/direnç, Fibonacci, mum formasyonları, zaman dilimi uyumu, kural tabanlı sinyal skoru ve son mumlar JSON olarak verilecek.
 Yanıt biçimi (Markdown, en fazla ~250 kelime):
 ### Genel Görünüm
 ### Önemli Seviyeler (destek / direnç, verideki fiyatlardan türet)
@@ -336,8 +397,13 @@ function buildPayload() {
       ema20: L(ind.ema20), ema50: L(ind.ema50), ema200: L(ind.ema200), rsi14: L(ind.rsi),
       macd: L(ind.macd.line), macd_sinyal: L(ind.macd.signal), macd_histogram: L(ind.macd.hist),
       bollinger_ust: L(ind.bb.upper), bollinger_orta: L(ind.bb.mid), bollinger_alt: L(ind.bb.lower), atr14: L(ind.atr),
+      stoch_rsi_k: L(ind.stoch.k), stoch_rsi_d: L(ind.stoch.d), adx: L(ind.adx.adx), arti_di: L(ind.adx.plusDI), eksi_di: L(ind.adx.minusDI),
     },
-    kural_tabanli_sinyal: { etiket: sig.label, skor: sig.score, gerekceler: sig.reasons.map(x => x.text) },
+    destekler: sig.sr.supports.map(l => r(l.price)), direncler: sig.sr.resistances.map(l => r(l.price)),
+    fibonacci: { yon: sig.fib.up ? 'yukselis' : 'dusus', seviyeler: sig.fib.levels.map(l => [l.ratio, r(l.price)]) },
+    mum_formasyonlari: sig.patterns.map(p => p.name),
+    zaman_dilimi_uyumu: Object.fromEntries(Object.entries(state.mtf).map(([k, v]) => [k, `${v.label} ${v.score}`])),
+    kural_tabanli_sinyal: { etiket: sig.label, skor: sig.score, gerekceler: sig.reasons.map(x => `${x.group}: ${x.text}`) },
     son_mumlar_OHLCV: c.slice(-40).map(k => [new Date(k.time * 1000).toISOString().slice(0, 16), r(k.open), r(k.high), r(k.low), r(k.close), r(k.volume)]),
   };
 }
@@ -365,7 +431,7 @@ function resetAI() {
   out.className = 'ai-out muted';
   out.innerHTML = safeGet('ks.apiKey')
     ? `${esc(state.symbol.replace(/USDT$/, ''))} için ${esc(state.interval)} yorumu almak üzere <b>Yorumla</b>'ya basın.`
-    : 'Göstergeler ve son mumlar Claude\'a gönderilir, Türkçe yorum döner. Önce <a href="#" class="ai-setup">AI Ayarları</a>\'ndan kendi API anahtarınızı girin.';
+    : 'Sinyaller bu bölüm olmadan da tamamen çalışır. İsterseniz göstergeleri Claude\'a gönderip Türkçe bir yorum alabilirsiniz; bunun için <a href="#" class="ai-setup">kendi Anthropic API anahtarınızı</a> girmeniz gerekir (ücretli).';
 }
 
 async function runAI() {
@@ -436,10 +502,11 @@ function bind() {
     safeSet('ks.favs', JSON.stringify([...state.favs]));
     renderHeader(); renderList();
   });
+  $('#mtf').addEventListener('click', e => { const d = e.target.closest('[data-iv]'); if (d && d.dataset.iv !== state.interval) selectSymbol(state.symbol, d.dataset.iv); });
   $('#scanBtn').addEventListener('click', runScan);
   $('#aiBtn').addEventListener('click', runAI);
   $('#settingsBtn').addEventListener('click', openSettings);
-  $('#aiOut').addEventListener('click', e => { if (e.target.matches('a.ai-setup, #aiSetupLink')) { e.preventDefault(); openSettings(); } });
+  $('#aiOut').addEventListener('click', e => { if (e.target.matches('a.ai-setup')) { e.preventDefault(); openSettings(); } });
   $('#saveKey').addEventListener('click', () => {
     const k = $('#apiKey').value.trim();
     if (k) safeSet('ks.apiKey', k);
@@ -480,6 +547,7 @@ async function init() {
     try {
       await loadTickers(); renderList(); renderHeader();
       if (state.source === 'coingecko') { state.candles = await loadCandles(state.symbol, state.interval); renderChart(false); }
+      loadMTF(state.symbol);
     } catch { /* bir sonraki turda tekrar */ }
   }, 60000);
 }
