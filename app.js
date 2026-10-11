@@ -167,7 +167,6 @@ function renderChart(fit) {
 
 // ---------- Sinyal paneli ----------
 const IV_LABEL = { '15m': '15dk', '1h': '1 saat', '4h': '4 saat', '1d': '1 gün' };
-const GROUPS = ['Trend', 'Momentum', 'Yapı', 'Formasyon', 'Volatilite', 'Hacim'];
 let srLines = [];
 
 function drawLevelLines(sig) {
@@ -192,11 +191,13 @@ function renderSignal(sig) {
     <div><span>Zarar-kes</span>${lv ? fmtPrice(lv.stop) : '—'}</div>
     <div><span>Hedef${lv ? ` · R/R ${lv.rr.toFixed(1)}` : ''}</span>${lv ? fmtPrice(lv.target) : '—'}</div>`;
 
-  $('#reasons').innerHTML = GROUPS.map(g => {
+  const W = TA.DEFAULTS.w, totalW = Object.values(W).reduce((x, y) => x + y, 0);
+  $('#reasons').innerHTML = Object.entries(TA.GROUP_NAMES).map(([key, g]) => {
     const rs = sig.reasons.filter(r => r.group === g);
     if (!rs.length) return '';
     const pts = rs.reduce((a, r) => a + r.pts, 0);
-    return `<div class="rg"><h3>${g}<span class="pts ${pts >= 0.5 ? 'up' : pts <= -0.5 ? 'down' : 'muted'}">${pts > 0 ? '+' : ''}${Math.round(pts)} puan</span></h3>
+    const head = W[key] ? `${pts > 0 ? '+' : ''}${Math.round(pts)} puan · ağırlık %${Math.round(W[key] / totalW * 100)}` : 'bilgi · skora etkisi yok';
+    return `<div class="rg ${W[key] ? '' : 'info'}"><h3>${g}<span class="pts ${!W[key] ? 'muted' : pts >= 0.5 ? 'up' : pts <= -0.5 ? 'down' : 'muted'}">${head}</span></h3>
       <ul class="reasons">${rs.map(r => `<li class="${r.w > 0 ? 'pos' : r.w < 0 ? 'neg' : 'neu'}">${esc(r.text)}</li>`).join('')}</ul></div>`;
   }).join('');
 
@@ -334,6 +335,63 @@ async function selectSymbol(sym, interval = state.interval) {
     $('#reasons').innerHTML = `<li class="neg">Mum verisi alınamadı: ${esc(e.message)}</li>`;
   }
   resetAI();
+}
+
+// ---------- Geriye dönük test ----------
+async function loadHistory(symbol, interval, total = 2000) {
+  if (state.source !== 'binance') return loadCandles(symbol, interval);
+  let end = Date.now(), out = [];
+  while (out.length < total) {
+    const k = await binance(`/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=1000&endTime=${end}`);
+    if (!k.length) break;
+    out = k.map(r => ({ time: Math.floor(r[0] / 1000), open: +r[1], high: +r[2], low: +r[3], close: +r[4], volume: +r[5] })).concat(out);
+    end = k[0][0] - 1;
+    if (k.length < 1000) break;
+  }
+  return out;
+}
+
+let btChart = null;
+async function runBacktest() {
+  const btn = $('#btBtn'), out = $('#btOut');
+  const sym = state.symbol, iv = state.interval;
+  btn.disabled = true; btn.textContent = 'Test ediliyor…';
+  out.innerHTML = '<p class="muted"><span class="spinner"></span>Geçmiş veri indiriliyor ve sinyaller tek tek hesaplanıyor…</p>';
+  try {
+    const c = await loadHistory(sym, iv);
+    await new Promise(r => setTimeout(r, 20));
+    const raws = BT.precompute(c);
+    const r = BT.run(c, raws, TA.DEFAULTS, { interval: iv });
+    const ls = BT.labelStats(c, raws, TA.DEFAULTS, 10);
+    const from = raws.findIndex(x => x);
+    const d = t => new Date(t * 1000).toLocaleDateString('tr-TR');
+    const pct = v => `<span class="${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%</span>`;
+    out.innerHTML = `
+      <p class="muted small-text">${esc(sym.replace(/USDT$/, ''))} · ${IV_LABEL[iv]} · ${d(c[from].time)} – ${d(c[c.length - 1].time)} · komisyon %0.1</p>
+      <div class="bt-grid">
+        <div><span>Strateji getirisi</span><b>${pct(r.ret)}</b></div>
+        <div><span>Al ve tut</span><b>${pct(r.holdRet)}</b></div>
+        <div><span>En büyük düşüş (strateji / al-tut)</span><b>−${(r.maxDD * 100).toFixed(0)}% / −${(r.holdDD * 100).toFixed(0)}%</b></div>
+        <div><span>İşlem · kârlı oranı</span><b>${r.nTrades} · %${(r.winRate * 100).toFixed(0)}</b></div>
+        <div><span>Ort. işlem</span><b>${pct(r.avgTrade)}</b></div>
+        <div><span>Piyasada kalma süresi</span><b>%${(r.exposure * 100).toFixed(0)}</b></div>
+      </div>
+      <div id="btChart" class="chart bt-chart"></div>
+      <div class="legend"><span><i style="background:var(--accent)"></i>Strateji</span><span><i style="background:var(--bb)"></i>Al ve tut</span></div>
+      <h3 class="mini-h">Sinyalden 10 mum sonra fiyat ne yaptı?</h3>
+      <div class="table-wrap"><table class="scan"><thead><tr><th>Sinyal</th><th>Kaç kez</th><th>Ort. değişim</th><th>Yükselme oranı</th></tr></thead><tbody>
+      ${Object.entries(ls).map(([l, s]) => `<tr><td><span class="pill ${l.includes('AL') ? 'buy' : l.includes('SAT') ? 'sell' : 'neutral'}">${l}</span></td><td class="mono">${s.n}</td><td class="mono">${s.n ? pct(s.avg) : '—'}</td><td class="mono">${s.n ? '%' + (s.hit * 100).toFixed(0) : '—'}</td></tr>`).join('')}
+      </tbody></table></div>`;
+    const el = $('#btChart');
+    if (btChart) btChart.remove();
+    btChart = LightweightCharts.createChart(el, { ...chartOpts(el, el.clientHeight), localization: { locale: 'tr-TR', priceFormatter: v => ((v - 1) * 100).toFixed(0) + '%' } });
+    btChart.addLineSeries({ color: css('--bb'), lineWidth: 1.5, priceLineVisible: false }).setData(r.curve.map(p => ({ time: p.time, value: p.hold })));
+    btChart.addLineSeries({ color: css('--accent'), lineWidth: 2, priceLineVisible: false }).setData(r.curve.map(p => ({ time: p.time, value: p.strat })));
+    btChart.timeScale().fitContent();
+  } catch (e) {
+    out.innerHTML = `<p class="down">Test yapılamadı: ${esc(e.message)}</p>`;
+  }
+  btn.disabled = false; btn.textContent = 'Yeniden test et';
 }
 
 // ---------- Radar ----------
@@ -504,6 +562,7 @@ function bind() {
   });
   $('#mtf').addEventListener('click', e => { const d = e.target.closest('[data-iv]'); if (d && d.dataset.iv !== state.interval) selectSymbol(state.symbol, d.dataset.iv); });
   $('#scanBtn').addEventListener('click', runScan);
+  $('#btBtn').addEventListener('click', runBacktest);
   $('#aiBtn').addEventListener('click', runAI);
   $('#settingsBtn').addEventListener('click', openSettings);
   $('#aiOut').addEventListener('click', e => { if (e.target.matches('a.ai-setup')) { e.preventDefault(); openSettings(); } });

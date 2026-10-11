@@ -7,7 +7,8 @@ Kullanılan yöntemler: MA200 trendi, EMA20/50, Golden/Death Cross (MA50×MA200)
 Canlı: https://anilkus.github.io/AnalysCr/
 
 - Veri: `data-api.binance.vision` (anahtarsız, CORS açık), canlı fiyat için Binance WebSocket. Erişilemezse CoinGecko.
-- Göstergeler ve sinyal skoru tamamen tarayıcıda hesaplanır (`indicators.js`).
+- Göstergeler ve sinyal skoru tamamen tarayıcıda hesaplanır (`indicators.js`), geriye dönük test `backtest.js`.
+- Ağırlıklar 10 coinlik geçmiş veride ayarlandı, sonuçlar: [BACKTEST.md](BACKTEST.md).
 - İsteğe bağlı AI yorumu: ziyaretçi kendi Anthropic API anahtarını girer; anahtar yalnızca tarayıcının localStorage'ında tutulur.
 
 > Yatırım tavsiyesi değildir.

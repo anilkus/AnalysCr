@@ -182,3 +182,16 @@ dialog::backdrop{background:rgba(5,10,20,.55)}
 .ai-details[open] summary h2::before{content:"▾"}
 .ai-details .ai-head{justify-content:flex-start}
 @media (max-width:560px){ .mtf{grid-template-columns:repeat(2,1fr)} .sr-grid{grid-template-columns:1fr} }
+
+/* v3: geriye dönük test */
+.bt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
+.bt-grid div{background:var(--bg);border-radius:9px;padding:8px 10px;font-size:.84rem}
+.bt-grid span{display:block;color:var(--muted);font-size:.72rem}
+.bt-grid b{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:500}
+.bt-chart{height:240px}
+.bt-study{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.bt-study summary{cursor:pointer;font-weight:600;font-size:.88rem}
+.bt-study p,.bt-study ul{margin:8px 0}
+.bt-study ul{padding-left:18px;display:flex;flex-direction:column;gap:5px}
+.rg.info{opacity:.75}
+@media (max-width:560px){ .bt-grid{grid-template-columns:1fr 1fr} }

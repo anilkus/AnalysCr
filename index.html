@@ -109,6 +109,29 @@
 
     <div class="panel">
       <div class="ai-head">
+        <h2>Geriye dönük test</h2>
+        <button id="btBtn" class="btn ghost">Bu coin için test et</button>
+      </div>
+      <p class="muted small-text">Seçili coin ve zaman diliminde son ~2000 mumda bu sinyallerle işlem yapılsaydı ne olurdu? Kural: skor +30'u geçince al, 0'ın altına düşünce sat. Yalnızca alış (spot), her işlemde %0.1 komisyon.</p>
+      <div id="btOut"></div>
+      <details class="bt-study">
+        <summary>10 coinlik test sonucu: bu ayarlar nasıl seçildi?</summary>
+        <div class="small-text">
+          <p>BTC, ETH, SOL, BNB, XRP, ADA, DOGE, AVAX, LINK ve LTC'nin 4 saatlik (Kas 2023'ten beri) ve günlük (Nis 2023'ten beri) verisinde 7.776 ağırlık/eşik kombinasyonu denendi. Ayar ilk %65'lik dönemde yapıldı, son %35 (Tem/Eki 2025 – Eki 2026) hiç bakılmadan kontrol için ayrıldı.</p>
+          <ul>
+            <li><b>Sinyaller fiyatı tahmin etmiyor.</b> Kontrol döneminde "GÜÇLÜ AL"dan sonraki 10 mumda fiyat ortalama −%0.2, "GÜÇLÜ SAT"tan sonra −%0.5 değişti. Fark çok küçük.</li>
+            <li><b>Asıl faydası düşüşte piyasa dışında kalmak.</b> Kontrol dönemindeki düşüşte al-tut medyan −%45 kaybettirdi (en büyük düşüş −%71). Strateji −%21'de kaldı (en büyük düşüş −%41) ve 20 testin 20'sinde al-tuttan az kaybettirdi. Günlük grafikte medyan +%9 (al-tut −%36), 4 saatlikte −%32 (al-tut −%48).</li>
+            <li><b>Yükselişte al-tut daha iyi.</b> Ayar döneminde (boğa piyasası) al-tut medyan +%134, strateji +%125 getirdi; al-tutu 20 testin yalnızca 7'sinde geçti.</li>
+            <li><b>Sonucu belirleyen trend.</b> Destek/direnç, Fibonacci, mum formasyonları ve hacim teste katkı sağlamadı. Ağırlıkları 0 yapıldı, yalnızca bilgi olarak gösteriliyor.</li>
+            <li>Basit bir "fiyat MA200 üstündeyse tut" kuralı da benzer sonuç verdi (kontrol döneminde medyan −%14). Yani sistemin değeri büyük ölçüde trend filtresinden geliyor.</li>
+            <li>Kârlı işlem oranı düşük (%29): trend takibinde sık görülür, kazançlar az sayıda büyük işlemden gelir. Günlük grafik 4 saatlikten daha iyi çalıştı.</li>
+          </ul>
+        </div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <div class="ai-head">
         <h2>Sinyal Radarı</h2>
         <button id="scanBtn" class="btn ghost">Taramayı başlat</button>
       </div>
@@ -159,6 +182,7 @@
 </dialog>
 
 <script src="indicators.js"></script>
+<script src="backtest.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

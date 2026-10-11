@@ -233,126 +233,171 @@
     };
   }
 
-  const last = (arr, back = 0) => arr[arr.length - 1 - back];
   const fmt = v => v.toLocaleString('tr-TR', { maximumSignificantDigits: v >= 1000 ? 6 : 4 });
 
-  // Ağırlıklı kurallar → -100..100 skor ve gruplanmış Türkçe gerekçeler.
-  function signal(candles, ind) {
-    ind = ind || computeAll(candles);
-    const closed = candles.slice(0, -1); // formasyonlar için kapanmış mumlar
-    const c = last(candles).close;
-    const reasons = [];
-    let score = 0, max = 0;
-    const add = (group, w, val, text) => { max += w; score += w * val; reasons.push({ group, w: val, pts: w * val, text }); };
-    const note = (group, text) => reasons.push({ group, w: 0, pts: 0, text });
+  // Varsayılan parametreler: tools/tune.mjs ile 10 coin × (4s, 1g) geçmişinde seçildi (bkz. BACKTEST.md).
+  // Destek/direnç, formasyon ve hacim testte getiriye katkı sağlamadığı için ağırlıkları 0, yalnızca bilgi olarak gösteriliyor.
+  const DEFAULTS = {
+    w: { trend: 35, momentum: 10, reversion: 20, structure: 0, pattern: 0, volume: 0 },
+    buy: 30,      // skor >= buy → AL, <= -buy → SAT
+    strong: 50,   // skor >= strong → GÜÇLÜ AL
+    gate: 0,      // trende ters dönüş sinyallerinin çarpanı (0 = yok say)
+    exit: 'zero', // backtestte pozisyondan çıkış: skor 0'ın altına inince
+  };
+  const GROUP_NAMES = { trend: 'Trend', momentum: 'Momentum', reversion: 'Aşırı alım/satım', structure: 'Yapı', pattern: 'Formasyon', volume: 'Hacim' };
+
+  // i. mumdaki sinyal. Göstergeler tüm seri için bir kez hesaplanır, yalnızca i ve öncesi kullanılır.
+  // opts.patternEnd: formasyonların bakacağı son kapanmış mum (canlıda i-1, backtestte i).
+  function signalRaw(candles, ind, i, opts = {}) {
+    const at = (arr, back = 0) => arr[i - back];
+    const c = candles[i].close;
+    const items = { trend: [], momentum: [], reversion: [], structure: [], pattern: [], volume: [] };
+    const notes = [];
+    const add = (g, val, text) => items[g].push({ val, text });
+    const note = (g, text) => notes.push({ g, text });
+
+    // --- Rejim: ana trend yönü ---
+    const a = at(ind.adx.adx), pdi = at(ind.adx.plusDI), mdi = at(ind.adx.minusDI);
+    const e20 = at(ind.ema20), e50 = at(ind.ema50), s200 = at(ind.sma200);
+    let regime = 'range';
+    if (s200 != null && e20 != null && e50 != null) {
+      if (c > s200 && e20 > e50) regime = 'up';
+      else if (c < s200 && e20 < e50) regime = 'down';
+    }
+    // Trende ters (dönüş) sinyalleri işaretlenir, puanlamada P.gate ile çarpılır
+    const gated = (g, val, text) => {
+      const against = (regime === 'down' && val > 0) || (regime === 'up' && val < 0);
+      items[g].push({ val, text, against });
+    };
 
     // --- Trend ---
-    const a = last(ind.adx.adx), pdi = last(ind.adx.plusDI), mdi = last(ind.adx.minusDI);
-    const strong = a != null && a >= 25;
-    const e20 = last(ind.ema20), e50 = last(ind.ema50), s200 = last(ind.sma200);
-    if (s200 != null) add('Trend', 15, c > s200 ? 1 : -1, c > s200 ? 'Fiyat MA200 (200 mumluk ortalama) üzerinde: ana trend yukarı.' : 'Fiyat MA200 altında: ana trend aşağı.');
-    if (e20 != null && e50 != null) add('Trend', 10, e20 > e50 ? 1 : -1, e20 > e50 ? 'EMA20 > EMA50: kısa vade yükselişte.' : 'EMA20 < EMA50: kısa vade düşüşte.');
-    // Golden / death cross: MA50, MA200'ü son 15 mumda kestiyse
+    if (s200 != null) add('trend', c > s200 ? 1 : -1, c > s200 ? 'Fiyat MA200 (200 mumluk ortalama) üzerinde: ana trend yukarı.' : 'Fiyat MA200 altında: ana trend aşağı.');
+    if (e20 != null && e50 != null) add('trend', e20 > e50 ? 1 : -1, e20 > e50 ? 'EMA20 > EMA50: kısa vade yükselişte.' : 'EMA20 < EMA50: kısa vade düşüşte.');
     let cross = 0;
     for (let b = 0; b < 15 && !cross; b++) {
-      const s50a = last(ind.sma50, b), s200a = last(ind.sma200, b), s50b = last(ind.sma50, b + 1), s200b = last(ind.sma200, b + 1);
+      const s50a = at(ind.sma50, b), s200a = at(ind.sma200, b), s50b = at(ind.sma50, b + 1), s200b = at(ind.sma200, b + 1);
       if ([s50a, s200a, s50b, s200b].some(v => v == null)) break;
       if (s50b <= s200b && s50a > s200a) cross = 1;
       else if (s50b >= s200b && s50a < s200a) cross = -1;
     }
-    if (cross) add('Trend', 15, cross, cross > 0 ? 'Golden Cross: MA50, MA200\'ü yukarı kesti.' : 'Death Cross: MA50, MA200\'ü aşağı kesti.');
+    if (cross) add('trend', cross, cross > 0 ? 'Golden Cross: MA50, MA200\'ü yukarı kesti.' : 'Death Cross: MA50, MA200\'ü aşağı kesti.');
     if (a != null) {
-      if (strong) add('Trend', 10, pdi > mdi ? 1 : -1, `ADX ${a.toFixed(0)}: güçlü trend, ${pdi > mdi ? 'alıcılar (+DI)' : 'satıcılar (−DI)'} baskın.`);
-      else note('Trend', `ADX ${a.toFixed(0)}: trend zayıf, yatay piyasa. Osilatör sinyalleri daha anlamlı.`);
+      if (a >= 25) add('trend', pdi > mdi ? 1 : -1, `ADX ${a.toFixed(0)}: güçlü trend, ${pdi > mdi ? 'alıcılar (+DI)' : 'satıcılar (−DI)'} baskın.`);
+      else note('trend', `ADX ${a.toFixed(0)}: trend zayıf, yatay piyasa.`);
     }
 
-    // --- Momentum ---
-    const r = last(ind.rsi);
+    // --- Momentum (tek oy: RSI yönü + MACD) ---
+    const r = at(ind.rsi);
     if (r != null) {
-      let v, t;
-      if (r < 30) { v = 1; t = `RSI ${r.toFixed(1)}: aşırı satım bölgesi.`; }
-      else if (r > 70) { v = -1; t = `RSI ${r.toFixed(1)}: aşırı alım bölgesi.`; }
-      else if (r >= 50) { v = 0.4; t = `RSI ${r.toFixed(1)}: 50 üzerinde, alıcılar baskın.`; }
-      else { v = -0.4; t = `RSI ${r.toFixed(1)}: 50 altında, satıcılar baskın.`; }
-      add('Momentum', 12, v, t);
+      const v = Math.max(-1, Math.min(1, (r - 50) / 20));
+      add('momentum', v, `RSI ${r.toFixed(1)}: ${r >= 50 ? 'alıcılar' : 'satıcılar'} baskın.`);
     }
-    const k = last(ind.stoch.k), d = last(ind.stoch.d), kp = last(ind.stoch.k, 1), dp = last(ind.stoch.d, 1);
-    if (k != null && d != null && kp != null && dp != null) {
-      if (kp <= dp && k > d && k < 30) add('Momentum', 10, 1, `Stoch RSI aşırı satımda yukarı kesişti (%K ${k.toFixed(0)}).`);
-      else if (kp >= dp && k < d && k > 70) add('Momentum', 10, -1, `Stoch RSI aşırı alımda aşağı kesişti (%K ${k.toFixed(0)}).`);
-      else if (k < 20) add('Momentum', 10, 0.5, `Stoch RSI ${Math.abs(k).toFixed(0)}: aşırı satım.`);
-      else if (k > 80) add('Momentum', 10, -0.5, `Stoch RSI ${k.toFixed(0)}: aşırı alım.`);
-      else add('Momentum', 10, k > d ? 0.2 : -0.2, `Stoch RSI ${k.toFixed(0)}, %K ${k > d ? '>' : '<'} %D.`);
-    }
-    const h = last(ind.macd.hist), hp = last(ind.macd.hist, 1);
+    const h = at(ind.macd.hist), hp = at(ind.macd.hist, 1);
     if (h != null && hp != null) {
-      if (hp <= 0 && h > 0) add('Momentum', 12, 1, 'MACD sinyal çizgisini yukarı kesti (AL kesişimi).');
-      else if (hp >= 0 && h < 0) add('Momentum', 12, -1, 'MACD sinyal çizgisini aşağı kesti (SAT kesişimi).');
-      else if (h > 0) add('Momentum', 12, h > hp ? 0.6 : 0.2, h > hp ? 'MACD pozitif ve güçleniyor.' : 'MACD pozitif ama ivme zayıflıyor.');
-      else add('Momentum', 12, h < hp ? -0.6 : -0.2, h < hp ? 'MACD negatif ve derinleşiyor.' : 'MACD negatif ama satış ivmesi azalıyor.');
+      if (hp <= 0 && h > 0) add('momentum', 1, 'MACD sinyal çizgisini yukarı kesti (AL kesişimi).');
+      else if (hp >= 0 && h < 0) add('momentum', -1, 'MACD sinyal çizgisini aşağı kesti (SAT kesişimi).');
+      else if (h > 0) add('momentum', h > hp ? 0.6 : 0.2, h > hp ? 'MACD pozitif ve güçleniyor.' : 'MACD pozitif ama ivme zayıflıyor.');
+      else add('momentum', h < hp ? -0.6 : -0.2, h < hp ? 'MACD negatif ve derinleşiyor.' : 'MACD negatif ama satış ivmesi azalıyor.');
     }
-    const div = divergence(candles, ind.rsi);
-    if (div) add('Momentum', 10, div.dir, div.text);
 
-    // --- Bollinger ---
-    const up = last(ind.bb.upper), lo = last(ind.bb.lower);
+    // --- Aşırı alım/satım (dönüş sinyalleri, rejimle filtrelenir) ---
+    if (r != null) {
+      if (r < 30) gated('reversion', 1, `RSI ${r.toFixed(1)}: aşırı satım.`);
+      else if (r > 70) gated('reversion', -1, `RSI ${r.toFixed(1)}: aşırı alım.`);
+    }
+    const k = at(ind.stoch.k), d = at(ind.stoch.d), kp = at(ind.stoch.k, 1), dp = at(ind.stoch.d, 1);
+    if (k != null && d != null && kp != null && dp != null) {
+      if (kp <= dp && k > d && k < 30) gated('reversion', 1, `Stoch RSI aşırı satımda yukarı kesişti (%K ${Math.abs(k).toFixed(0)}).`);
+      else if (kp >= dp && k < d && k > 70) gated('reversion', -1, `Stoch RSI aşırı alımda aşağı kesişti (%K ${k.toFixed(0)}).`);
+      else note('reversion', `Stoch RSI %K ${Math.abs(k).toFixed(0)}, %D ${Math.abs(d).toFixed(0)}.`);
+    }
+    const W0 = Math.max(0, i - 299);
+    const win = candles.slice(W0, i + 1);
+    const div = divergence(win, ind.rsi.slice(W0, i + 1));
+    if (div) gated('reversion', div.dir, div.text);
+    const up = at(ind.bb.upper), lo = at(ind.bb.lower), mid = at(ind.bb.mid);
     if (up != null && lo != null) {
       const pb = (c - lo) / (up - lo || 1);
-      // Güçlü trendde bant kenarı devam sinyalidir, yatayda dönüş sinyali
-      if (pb < 0.05) add('Volatilite', 8, strong && mdi > pdi ? -0.3 : 0.8, strong && mdi > pdi ? 'Alt Bollinger bandında, güçlü düşüş trendinde (bant boyunca yürüyor).' : 'Alt Bollinger bandına değdi: dönüş olası.');
-      else if (pb > 0.95) add('Volatilite', 8, strong && pdi > mdi ? 0.3 : -0.8, strong && pdi > mdi ? 'Üst Bollinger bandında, güçlü yükseliş trendinde (bant boyunca yürüyor).' : 'Üst Bollinger bandına değdi: geri çekilme olası.');
-      else note('Volatilite', `Fiyat Bollinger bandının %${Math.round(pb * 100)} seviyesinde.`);
-      const width = (up - lo) / last(ind.bb.mid);
-      const widths = ind.bb.upper.slice(-120).map((u, i, arr) => u == null ? null : (u - ind.bb.lower.slice(-120)[i]) / ind.bb.mid.slice(-120)[i]).filter(v => v != null);
-      if (widths.length > 50 && width <= Math.min(...widths) * 1.1) note('Volatilite', 'Bollinger sıkışması: sert bir hareket yaklaşıyor olabilir.');
+      if (pb < 0.05) gated('reversion', 0.8, 'Alt Bollinger bandına değdi.');
+      else if (pb > 0.95) gated('reversion', -0.8, 'Üst Bollinger bandına değdi.');
+      else note('reversion', `Fiyat Bollinger bandının %${Math.round(pb * 100)} seviyesinde.`);
+      const width = (up - lo) / mid;
+      let minW = Infinity;
+      for (let j = Math.max(0, i - 119); j <= i; j++) if (ind.bb.mid[j]) minW = Math.min(minW, (ind.bb.upper[j] - ind.bb.lower[j]) / ind.bb.mid[j]);
+      if (i > 150 && width <= minW * 1.1) note('reversion', 'Bollinger sıkışması: sert bir hareket yaklaşıyor olabilir.');
     }
 
     // --- Yapı: destek/direnç ve Fibonacci ---
-    const atrNow = last(ind.atr);
-    const sr = supportResistance(candles, atrNow);
+    const atrNow = at(ind.atr);
+    const sr = supportResistance(win, atrNow);
     const ns = sr.supports[0], nr = sr.resistances[0];
-    if (atrNow) {
-      const prevClose = last(candles, 1).close;
-      const prevRes = supportResistance(candles.slice(0, -1), atrNow).resistances;
-      const broken = prevRes.find(l => prevClose < l.price && c > l.price);
-      if (broken) add('Yapı', 15, 1, `${fmt(broken.price)} direnci yukarı kırıldı.`);
-      else if (ns && c - ns.price < atrNow * 0.8) add('Yapı', 15, 0.7, `Fiyat ${fmt(ns.price)} desteğine yakın (${ns.touches} dokunuş).`);
-      else if (nr && nr.price - c < atrNow * 0.8) add('Yapı', 15, -0.7, `Fiyat ${fmt(nr.price)} direncine yakın (${nr.touches} dokunuş).`);
-      else note('Yapı', `En yakın destek ${ns ? fmt(ns.price) : '—'}, direnç ${nr ? fmt(nr.price) : '—'}.`);
+    if (atrNow && i > 0) {
+      const prevClose = candles[i - 1].close;
+      const broken = supportResistance(win.slice(0, -1), atrNow).resistances.find(l => prevClose < l.price && c > l.price);
+      if (broken) add('structure', 1, `${fmt(broken.price)} direnci yukarı kırıldı.`);
+      else if (ns && c - ns.price < atrNow * 0.8) gated('structure', 0.7, `Fiyat ${fmt(ns.price)} desteğine yakın (${ns.touches} dokunuş).`);
+      else if (nr && nr.price - c < atrNow * 0.8) gated('structure', -0.7, `Fiyat ${fmt(nr.price)} direncine yakın (${nr.touches} dokunuş).`);
+      else note('structure', `En yakın destek ${ns ? fmt(ns.price) : '—'}, direnç ${nr ? fmt(nr.price) : '—'}.`);
     }
-    const fib = fibonacci(candles);
+    const fib = fibonacci(win);
     if (atrNow) {
       const near = fib.levels.filter(l => l.ratio > 0 && l.ratio < 1).find(l => Math.abs(c - l.price) < atrNow * 0.5);
       if (near) {
         const golden = near.ratio === 0.5 || near.ratio === 0.618;
-        add('Yapı', 8, (fib.up ? 1 : -1) * (golden ? 0.8 : 0.4),
+        gated('structure', (fib.up ? 1 : -1) * (golden ? 0.8 : 0.4),
           `Fiyat ${fib.up ? 'yükseliş' : 'düşüş'} salınımının Fibonacci %${(near.ratio * 100).toFixed(1)} seviyesinde (${fmt(near.price)})${golden ? ': klasik dönüş bölgesi' : ''}.`);
       }
     }
 
     // --- Mum formasyonları ---
-    const pats = candlePatterns(closed);
-    pats.forEach(p => p.dir ? add('Formasyon', 8, p.dir, `${p.name} formasyonu (son kapanan mum).`) : note('Formasyon', `${p.name} (son kapanan mum).`));
-    if (!pats.length) note('Formasyon', 'Son mumlarda belirgin formasyon yok.');
+    const pe = opts.patternEnd != null ? opts.patternEnd : i;
+    const pats = candlePatterns(candles.slice(Math.max(0, pe - 30), pe + 1));
+    pats.forEach(p => p.dir ? gated('pattern', p.dir, `${p.name} formasyonu (son kapanan mum).`) : note('pattern', `${p.name} (son kapanan mum).`));
+    if (!pats.length) note('pattern', 'Son mumlarda belirgin formasyon yok.');
 
     // --- Hacim ---
-    const vs = last(ind.volSma, 1), vol = last(closed)?.volume;
-    if (vs && vol != null) {
-      const ratio = vol / vs, k1 = last(closed);
-      const dir = k1.close >= k1.open ? 1 : -1;
-      if (ratio > 1.5) add('Hacim', 10, dir, `Son mumda hacim ortalamanın ${ratio.toFixed(1)} katı, ${dir > 0 ? 'alıcılı' : 'satıcılı'}: hareketi teyit ediyor.`);
-      else note('Hacim', `Hacim normal (ortalamanın ${ratio.toFixed(1)} katı).`);
+    const vs = ind.volSma[pe - 1], k1 = candles[pe];
+    if (vs && k1) {
+      const ratio = k1.volume / vs, dir = k1.close >= k1.open ? 1 : -1;
+      if (ratio > 1.5) add('volume', dir, `Son kapanan mumda hacim ortalamanın ${ratio.toFixed(1)} katı, ${dir > 0 ? 'alıcılı' : 'satıcılı'}.`);
+      else note('volume', `Hacim normal (ortalamanın ${ratio.toFixed(1)} katı).`);
     }
 
-    const norm = max ? Math.round((score / max) * 100) : 0;
+    return { items, notes, regime, c, r, a, atrNow, sr, ns, nr, fib, pats };
+  }
+
+  // Ham sinyali parametrelerle puanla: her grup kendi içinde ortalanır (-1..1), sonra ağırlıklandırılır
+  function scoreRaw(raw, P = DEFAULTS) {
+    const { items, regime, c, atrNow, ns, nr } = raw;
+    const totalW = Object.values(P.w).reduce((x, y) => x + y, 0) || 1;
+    const groups = {}, reasons = [], extraNotes = [];
+    let score = 0;
+    for (const g of Object.keys(items)) {
+      const its = [];
+      for (const it of items[g]) {
+        if (!it.against) { its.push(it); continue; }
+        if (P.gate > 0) its.push({ val: it.val * P.gate, text: it.text + (P.gate < 1 ? ` (trende ters, etkisi ×${P.gate})` : '') });
+        else extraNotes.push({ g, text: it.text + ` Ana trend ${regime === 'down' ? 'aşağı' : 'yukarı'} olduğu için puanlanmadı.` });
+      }
+      if (!P.w[g]) { // ağırlığı 0 olan gruplar yalnızca bilgi olarak gösterilir
+        groups[g] = 0;
+        its.forEach(it => extraNotes.push({ g, text: it.text }));
+        continue;
+      }
+      const gv = its.length ? its.reduce((x, y) => x + y.val, 0) / its.length : 0;
+      groups[g] = gv;
+      score += (P.w[g] * gv) / totalW * 100;
+      its.forEach(it => reasons.push({ group: GROUP_NAMES[g], w: it.val, pts: (P.w[g] * it.val) / its.length / totalW * 100, text: it.text }));
+    }
+    raw.notes.concat(extraNotes).forEach(n => reasons.push({ group: GROUP_NAMES[n.g], w: 0, pts: 0, text: n.text }));
+    const norm = Math.round(score);
     let label, cls;
-    if (norm >= 40) { label = 'GÜÇLÜ AL'; cls = 'buy'; }
-    else if (norm >= 15) { label = 'AL'; cls = 'buy'; }
-    else if (norm <= -40) { label = 'GÜÇLÜ SAT'; cls = 'sell'; }
-    else if (norm <= -15) { label = 'SAT'; cls = 'sell'; }
+    if (norm >= P.strong) { label = 'GÜÇLÜ AL'; cls = 'buy'; }
+    else if (norm >= P.buy) { label = 'AL'; cls = 'buy'; }
+    else if (norm <= -P.strong) { label = 'GÜÇLÜ SAT'; cls = 'sell'; }
+    else if (norm <= -P.buy) { label = 'SAT'; cls = 'sell'; }
     else { label = 'BEKLE'; cls = 'neutral'; }
 
-    // Zarar-kes / hedef: önce yapısal seviyeler, yoksa ATR
     let levels = null;
     if (atrNow) {
       if (cls === 'sell') {
@@ -366,11 +411,19 @@
       }
       levels.rr = Math.abs(levels.target - c) / Math.abs(c - levels.stop);
     }
-
-    return { score: norm, label, cls, reasons, rsi: r, adx: a, atr: atrNow, levels, price: c, sr, fib, patterns: pats };
+    return { score: norm, label, cls, reasons, groups, regime, rsi: raw.r, adx: raw.a, atr: atrNow, levels, price: c, sr: raw.sr, fib: raw.fib, patterns: raw.pats };
   }
 
-  const TA = { ema, sma, rsi, stochRsi, macd, bollinger, atr, adx, pivots, supportResistance, fibonacci, candlePatterns, divergence, computeAll, signal };
+  const signalAt = (candles, ind, i, P = DEFAULTS, opts = {}) => scoreRaw(signalRaw(candles, ind, i, opts), P);
+
+  // Canlı sinyal: son mum henüz kapanmadığı için formasyonlar bir önceki muma bakar.
+  function signal(candles, ind, P) {
+    ind = ind || computeAll(candles);
+    const i = candles.length - 1;
+    return signalAt(candles, ind, i, P || DEFAULTS, { patternEnd: i - 1 });
+  }
+
+  const TA = { ema, sma, rsi, stochRsi, macd, bollinger, atr, adx, pivots, supportResistance, fibonacci, candlePatterns, divergence, computeAll, signal, signalAt, signalRaw, scoreRaw, DEFAULTS, GROUP_NAMES };
   if (typeof module !== 'undefined' && module.exports) module.exports = TA;
   else root.TA = TA;
 })(typeof window !== 'undefined' ? window : globalThis);
