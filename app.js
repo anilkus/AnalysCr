@@ -1,4 +1,4 @@
-import Anthropic from 'https://esm.sh/@anthropic-ai/sdk@0.127.0';
+import { PROVIDERS, ORDER, available, complete, parseJSON } from './llm.js';
 
 const TA = window.TA;
 const $ = s => document.querySelector(s);
@@ -363,6 +363,9 @@ async function runBacktest() {
     const raws = BT.precompute(c);
     const r = BT.run(c, raws, TA.DEFAULTS, { interval: iv });
     const ls = BT.labelStats(c, raws, TA.DEFAULTS, 10);
+    const p1 = v => +(v * 100).toFixed(1);
+    state.lastBacktest = { sym, iv, mum: c.length, strateji_getiri_yuzde: p1(r.ret), al_tut_getiri_yuzde: p1(r.holdRet), strateji_max_dusus_yuzde: p1(r.maxDD), al_tut_max_dusus_yuzde: p1(r.holdDD), islem: r.nTrades, karli_islem_yuzde: p1(r.winRate),
+      etiket_sonrasi_10_mum: Object.fromEntries(Object.entries(ls).map(([l, s]) => [l, { adet: s.n, ort_degisim_yuzde: p1(s.avg), yukselme_orani_yuzde: p1(s.hit) }])) };
     const from = raws.findIndex(x => x);
     const d = t => new Date(t * 1000).toLocaleDateString('tr-TR');
     const pct = v => `<span class="${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%</span>`;
@@ -433,15 +436,30 @@ async function runScan() {
 }
 
 // ---------- Yapay zeka yorumu ----------
-const AI_SYSTEM = `Sen deneyimli bir kripto para teknik analistisin. Kullanıcıya Türkçe, sade ve dürüst bir piyasa yorumu yaz.
-Sana bir coinin güncel fiyatı, hesaplanmış göstergeler (EMA, RSI, Stoch RSI, MACD, ADX, Bollinger, ATR), destek/direnç, Fibonacci, mum formasyonları, zaman dilimi uyumu, kural tabanlı sinyal skoru ve son mumlar JSON olarak verilecek.
-Yanıt biçimi (Markdown, en fazla ~250 kelime):
+const BACKTEST_NOTE = 'Bu sitenin kural tabanlı sinyalleri 10 coinin 2023-2026 verisinde test edildi: etiketler kısa vadeli (10 mum) yönü anlamlı biçimde tahmin etmiyor (GÜÇLÜ AL sonrası ort. -%0.2, GÜÇLÜ SAT sonrası -%0.5). Asıl fayda düşüş trendinde piyasa dışında kalarak kaybı ve en büyük düşüşü yaklaşık yarıya indirmek; değerin çoğu MA200 trend filtresinden geliyor. Destek/direnç, Fibonacci, mum formasyonları ve hacim teste katkı sağlamadı.';
+
+const AI_SYSTEM = `Sen deneyimli ve temkinli bir kripto para teknik analistisin. Kullanıcıya Türkçe, sade ve dürüst bir yorum yaz.
+Sana bir coinin verisi ve bu sitenin kendi teknik analizi (göstergeler, kural tabanlı skor ve gerekçeleri, zaman dilimi uyumu, varsa geriye dönük test) JSON olarak verilecek. Kendi göstergeni hesaplamaya çalışma; verilen analizi yorumla.
+Önemli bağlam: ${BACKTEST_NOTE}
+Yanıt biçimi (Markdown, en fazla ~220 kelime):
 ### Genel Görünüm
-### Önemli Seviyeler (destek / direnç, verideki fiyatlardan türet)
-### Senaryo (AL / SAT / BEKLE önerisi; giriş bölgesi, zarar-kes ve hedef ile)
+### Önemli Seviyeler (yalnızca verideki fiyatlardan)
+### Senaryo (AL / SAT / BEKLE; giriş, zarar-kes, hedef)
 ### Riskler
-Göstergeler birbiriyle çelişiyorsa bunu açıkça söyle ve emin olmadığında BEKLE de. Veride olmayan haberleri veya olayları uydurma.
+Göstergeler ya da zaman dilimleri çelişiyorsa açıkça söyle ve emin değilsen BEKLE de. Veride olmayan haber ya da olay uydurma. Kesinlik bildiren ifadeler kullanma.
 Son satırda tek cümleyle bunun yatırım tavsiyesi olmadığını hatırlat.`;
+
+const JUDGE_SYSTEM = `Sen bir hakemsin (LLM-as-judge). Görevin: bir kripto coin için verilen ham teknik analiz verisini ve bir yapay zeka analistinin yorumunu karşılaştırıp son kararı vermek.
+Adımlar:
+1. Analistin yorumu verilerle tutarlı mı? Verilerde olmayan seviye/olay uydurmuş mu, göstergeleri yanlış okumuş mu, aşırı emin mi? Sorunları listele.
+2. Ham veriye göre son kararı ver: AL, SAT ya da BEKLE.
+Kurallar:
+- ${BACKTEST_NOTE}
+- Bu yüzden ana trend (MA200, EMA20/50) ile kural tabanlı skor aynı yönü göstermiyorsa ya da zaman dilimleri çelişiyorsa BEKLE de.
+- Düşüş trendinde (fiyat MA200 altında) yalnızca aşırı satım gibi dönüş işaretlerine dayanarak AL deme.
+- "guven" 0-100 arası; bu sinyallerin yön tahmini zayıf olduğu için 70'i aşma.
+Yalnızca şu JSON'u döndür, başka metin yazma:
+{"karar":"AL|SAT|BEKLE","guven":0-100,"analist_tutarli":true|false,"analist_puani":1-10,"sorunlar":["..."],"gerekce":"2-3 cümle Türkçe","zarar_kes":sayı|null,"hedef":sayı|null}`;
 
 function buildPayload() {
   const c = state.candles, ind = TA.computeAll(c), sig = state.lastSignal || TA.signal(c, ind);
@@ -461,7 +479,8 @@ function buildPayload() {
     fibonacci: { yon: sig.fib.up ? 'yukselis' : 'dusus', seviyeler: sig.fib.levels.map(l => [l.ratio, r(l.price)]) },
     mum_formasyonlari: sig.patterns.map(p => p.name),
     zaman_dilimi_uyumu: Object.fromEntries(Object.entries(state.mtf).map(([k, v]) => [k, `${v.label} ${v.score}`])),
-    kural_tabanli_sinyal: { etiket: sig.label, skor: sig.score, gerekceler: sig.reasons.map(x => `${x.group}: ${x.text}`) },
+    kural_tabanli_sinyal: { etiket: sig.label, skor: sig.score, rejim: sig.regime, esikler: { al: TA.DEFAULTS.buy, guclu_al: TA.DEFAULTS.strong }, gerekceler: sig.reasons.map(x => `${x.group}: ${x.text}`) },
+    bu_coin_geriye_donuk_test: state.lastBacktest && state.lastBacktest.sym === state.symbol && state.lastBacktest.iv === state.interval ? state.lastBacktest : null,
     son_mumlar_OHLCV: c.slice(-40).map(k => [new Date(k.time * 1000).toISOString().slice(0, 16), r(k.open), r(k.high), r(k.low), r(k.close), r(k.volume)]),
   };
 }
@@ -483,49 +502,67 @@ function md(text) {
   return html;
 }
 
+function llmConfig() {
+  const cfg = {};
+  for (const p of ORDER) cfg[p] = { key: safeGet(`ks.key.${p}`) || '', model: safeGet(`ks.model.${p}`) || '' };
+  // önceki sürümden kalan Claude anahtarı
+  if (!cfg.claude.key && safeGet('ks.apiKey')) cfg.claude.key = safeGet('ks.apiKey');
+  return cfg;
+}
+
 function resetAI() {
   const out = $('#aiOut');
   if (out.dataset.busy) return;
+  const av = available(llmConfig());
+  const keyed = av.filter(p => PROVIDERS[p].needsKey);
   out.className = 'ai-out muted';
-  out.innerHTML = safeGet('ks.apiKey')
-    ? `${esc(state.symbol.replace(/USDT$/, ''))} için ${esc(state.interval)} yorumu almak üzere <b>Yorumla</b>'ya basın.`
-    : 'Sinyaller bu bölüm olmadan da tamamen çalışır. İsterseniz göstergeleri Claude\'a gönderip Türkçe bir yorum alabilirsiniz; bunun için <a href="#" class="ai-setup">kendi Anthropic API anahtarınızı</a> girmeniz gerekir (ücretli).';
+  out.innerHTML = `<p>${esc(state.symbol.replace(/USDT$/, ''))} · ${esc(IV_LABEL[state.interval] || state.interval)} için <b>Yorumla</b>'ya basın. Önce bir model sitenin analizini yorumlar, ardından ikinci bir model (hakem) bu yorumu verilerle karşılaştırıp son kararı verir.</p>` +
+    (keyed.length ? `<p class="small-text">Kullanılacak: ${keyed.map(p => esc(PROVIDERS[p].name)).join(', ')}, yedek olarak Pollinations.</p>`
+      : `<p class="small-text">Şu an anahtarsız ücretsiz model (Pollinations) kullanılacak. Daha tutarlı sonuç için <a href="#" class="ai-setup">ücretsiz bir Gemini anahtarı ekleyin</a> (1 dakika, kart gerekmez).</p>`);
+}
+
+function verdictCard(v, meta) {
+  const karar = ['AL', 'SAT', 'BEKLE'].includes(v.karar) ? v.karar : 'BEKLE';
+  const cls = karar === 'AL' ? 'buy' : karar === 'SAT' ? 'sell' : 'neutral';
+  const g = Math.max(0, Math.min(100, +v.guven || 0));
+  const num = x => (typeof x === 'number' && isFinite(x)) ? fmtPrice(x) : '—';
+  return `<div class="judge">
+    <div class="judge-top">
+      <div class="badge ${cls}">${karar}</div>
+      <div class="judge-conf"><span>Güven %${g}</span><div class="conf-bar"><i style="width:${g}%"></i></div></div>
+    </div>
+    <p>${esc(v.gerekce || '')}</p>
+    <div class="levels mono"><div><span>Zarar-kes</span>${num(v.zarar_kes)}</div><div><span>Hedef</span>${num(v.hedef)}</div>
+      <div><span>Analist puanı</span>${v.analist_puani != null ? esc(v.analist_puani) + '/10' : '—'}</div></div>
+    <p class="small-text ${v.analist_tutarli === false ? 'down' : 'muted'}">${v.analist_tutarli === false ? 'Hakem, analistin yorumunu verilerle tam tutarlı bulmadı.' : 'Hakem, analistin yorumunu verilerle tutarlı buldu.'}</p>
+    ${Array.isArray(v.sorunlar) && v.sorunlar.length ? `<ul class="small-text">${v.sorunlar.slice(0, 5).map(s => `<li>${esc(s)}</li>`).join('')}</ul>` : ''}
+    <p class="muted small-text">Hakem: ${esc(meta)}</p>
+  </div>`;
 }
 
 async function runAI() {
-  const key = safeGet('ks.apiKey');
-  if (!key) { openSettings(); return; }
   if (!state.candles.length) return;
-  const model = safeGet('ks.model') || 'claude-opus-5-5';
+  const cfg = llmConfig();
   const out = $('#aiOut'), btn = $('#aiBtn');
   out.dataset.busy = '1'; btn.disabled = true;
   out.className = 'ai-out';
-  out.innerHTML = '<span class="spinner"></span>Claude analiz ediyor…';
-  const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
-  const params = {
-    model, max_tokens: 16000,
-    output_config: { effort: 'medium' },
-    system: AI_SYSTEM,
-    messages: [{ role: 'user', content: 'Şu verileri yorumla:\n```json\n' + JSON.stringify(buildPayload()) + '\n```' }],
-  };
-  // Opus/Sonnet 5.5'te güvenlik sınıflandırıcısı reddederse sunucu tarafında yedek modele geçilir.
-  if (model !== 'claude-haiku-5-5') { params.betas = ['server-side-fallback-2026-07-01']; params.fallbacks = 'default'; }
+  const data = '```json\n' + JSON.stringify(buildPayload()) + '\n```';
+  const label = r => `${PROVIDERS[r.provider].name} · ${r.model}`;
   try {
-    let text = '';
-    const stream = client.beta.messages.stream(params);
-    stream.on('text', d => { text += d; out.innerHTML = md(text); });
-    const msg = await stream.finalMessage();
-    if (msg.stop_reason === 'refusal') {
-      out.innerHTML = '<p class="err">Model bu isteği yanıtlamadı. Farklı bir model seçip tekrar deneyin.</p>';
-    } else {
-      out.innerHTML = md(text) + `<p class="muted small-text">${esc(model)} · ${new Date().toLocaleTimeString('tr-TR')}</p>`;
-    }
+    out.innerHTML = '<p><span class="spinner"></span>1/2 · Analist model yorumluyor…</p>';
+    const a = await complete(cfg, AI_SYSTEM, 'Şu verileri yorumla:\n' + data);
+    const analystHtml = `<h3 class="mini-h">Analist yorumu</h3>${md(a.text)}<p class="muted small-text">${esc(label(a))}</p>`;
+    out.innerHTML = analystHtml + '<p><span class="spinner"></span>2/2 · Hakem model yorumu verilerle karşılaştırıyor…</p>';
+    // Hakem mümkünse analistten farklı bir sağlayıcı olsun
+    const j = await complete(cfg, JUDGE_SYSTEM, `Ham veri:\n${data}\n\nAnalistin yorumu:\n<<<\n${a.text}\n>>>`, { json: true, exclude: a.provider });
+    const v = parseJSON(j.text);
+    const same = j.provider === a.provider && j.model === a.model;
+    const judgeHtml = v && v.karar
+      ? verdictCard(v, label(j) + (same ? ' (analistle aynı model; ikinci bir sağlayıcı anahtarı eklerseniz bağımsız hakem kullanılır)' : ''))
+      : '<p class="err">Hakem geçerli bir karar döndürmedi.</p>';
+    out.innerHTML = `<h3 class="mini-h">Hakem kararı</h3>${judgeHtml}${analystHtml}<p class="muted small-text">${new Date().toLocaleTimeString('tr-TR')} · Yatırım tavsiyesi değildir.</p>`;
   } catch (e) {
-    let m = e.message || String(e);
-    if (e.status === 401) m = 'API anahtarı geçersiz. AI Ayarları\'ndan kontrol edin.';
-    else if (e.status === 429) m = 'Hız/bakiye limiti aşıldı, biraz sonra tekrar deneyin.';
-    else if (e.status === 400 && /credit/i.test(m)) m = 'Anthropic hesabınızda kredi yok görünüyor.';
-    out.innerHTML = `<p class="err">Hata: ${esc(m)}</p>`;
+    out.innerHTML = `<p class="err">Yapay zeka yanıt veremedi: ${esc(e.message || String(e))}</p><p class="small-text"><a href="#" class="ai-setup">Ayarlardan</a> ücretsiz bir Gemini ya da Groq anahtarı ekleyip tekrar deneyin.</p>`;
   } finally {
     delete out.dataset.busy; btn.disabled = false;
   }
@@ -533,9 +570,26 @@ async function runAI() {
 
 // ---------- Ayarlar ----------
 function openSettings() {
-  $('#apiKey').value = safeGet('ks.apiKey') || '';
-  $('#model').value = safeGet('ks.model') || 'claude-opus-5-5';
+  const cfg = llmConfig();
+  $('#providerFields').innerHTML = ['gemini', 'groq', 'openrouter', 'claude'].map(p => `
+    <fieldset class="prov">
+      <legend>${esc(PROVIDERS[p].name)} ${p === 'gemini' ? '<span class="pill buy">önerilen</span> ' : ''}${PROVIDERS[p].free ? '<span class="pill buy">ücretsiz</span>' : '<span class="pill neutral">ücretli</span>'}</legend>
+      <input data-key="${p}" type="password" placeholder="API anahtarı" autocomplete="off" value="${esc(cfg[p].key)}">
+      <input data-model="${p}" type="text" list="models-${p}" placeholder="Model (boş: ${esc(PROVIDERS[p].models[0])})" value="${esc(cfg[p].model)}">
+      <datalist id="models-${p}">${PROVIDERS[p].models.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+      <a class="small-text" href="${PROVIDERS[p].keyUrl}" target="_blank" rel="noopener">Anahtar al →</a>
+    </fieldset>`).join('');
   $('#settings').showModal();
+}
+
+function saveSettings() {
+  document.querySelectorAll('#providerFields [data-key]').forEach(i => {
+    const v = i.value.trim();
+    try { v ? localStorage.setItem(`ks.key.${i.dataset.key}`, v) : localStorage.removeItem(`ks.key.${i.dataset.key}`); } catch { /* yok say */ }
+  });
+  document.querySelectorAll('#providerFields [data-model]').forEach(i => safeSet(`ks.model.${i.dataset.model}`, i.value.trim()));
+  try { localStorage.removeItem('ks.apiKey'); localStorage.removeItem('ks.model'); } catch { /* yok say */ }
+  resetAI();
 }
 
 // ---------- Tema ----------
@@ -566,15 +620,9 @@ function bind() {
   $('#aiBtn').addEventListener('click', runAI);
   $('#settingsBtn').addEventListener('click', openSettings);
   $('#aiOut').addEventListener('click', e => { if (e.target.matches('a.ai-setup')) { e.preventDefault(); openSettings(); } });
-  $('#saveKey').addEventListener('click', () => {
-    const k = $('#apiKey').value.trim();
-    if (k) safeSet('ks.apiKey', k);
-    safeSet('ks.model', $('#model').value);
-    resetAI();
-  });
+  $('#saveKey').addEventListener('click', saveSettings);
   $('#clearKey').addEventListener('click', () => {
-    try { localStorage.removeItem('ks.apiKey'); } catch { /* yok say */ }
-    $('#apiKey').value = '';
+    try { ORDER.forEach(p => localStorage.removeItem(`ks.key.${p}`)); localStorage.removeItem('ks.apiKey'); } catch { /* yok say */ }
     $('#settings').close(); resetAI();
   });
   $('#themeBtn').addEventListener('click', () => {

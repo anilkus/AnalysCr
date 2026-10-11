@@ -9,6 +9,6 @@ Canlı: https://anilkus.github.io/AnalysCr/
 - Veri: `data-api.binance.vision` (anahtarsız, CORS açık), canlı fiyat için Binance WebSocket. Erişilemezse CoinGecko.
 - Göstergeler ve sinyal skoru tamamen tarayıcıda hesaplanır (`indicators.js`), geriye dönük test `backtest.js`.
 - Ağırlıklar 10 coinlik geçmiş veride ayarlandı, sonuçlar: [BACKTEST.md](BACKTEST.md).
-- İsteğe bağlı AI yorumu: ziyaretçi kendi Anthropic API anahtarını girer; anahtar yalnızca tarayıcının localStorage'ında tutulur.
+- Yapay zeka yorumu + hakem (LLM-as-judge): bir model sitenin analizini yorumlar, ikinci model yorumu verilerle karşılaştırıp AL/SAT/BEKLE kararı verir (`llm.js`). Anahtarsız Pollinations ile çalışır; ücretsiz Gemini, Groq, OpenRouter ya da Claude anahtarı eklenebilir. Anahtarlar yalnızca tarayıcının localStorage'ında tutulur.
 
 > Yatırım tavsiyesi değildir.
