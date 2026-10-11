@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kripto Sinyal | Anıl Kuş</title>
+<meta name="description" content="Binance açık verisiyle kripto takip, teknik analiz sinyalleri ve yapay zeka yorumu.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230E9F9A'/><path d='M7 22l6-7 5 4 7-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-row">
+    <a class="brand" href="./"><span class="dot"></span>Kripto Sinyal</a>
+    <div class="top-actions">
+      <span id="conn" class="conn" title="Canlı veri bağlantısı">bağlanıyor…</span>
+      <button id="themeBtn" class="icon-btn" title="Tema">◐</button>
+      <button id="settingsBtn" class="btn ghost">⚙ AI Ayarları</button>
+    </div>
+  </div>
+</header>
+
+<div class="disclaimer wrap">
+  ⚠️ Bu sayfa eğitim ve deneme amaçlıdır, <b>yatırım tavsiyesi değildir</b>. Sinyaller teknik göstergelerden otomatik üretilir ve yanılabilir. Kararlarınızın sorumluluğu size aittir.
+</div>
+
+<main class="wrap grid">
+  <aside class="panel side">
+    <div class="side-head">
+      <input id="search" type="search" placeholder="Coin ara (ör. SOL)" autocomplete="off">
+    </div>
+    <div class="tabs small" id="listTabs">
+      <button data-tab="all" class="active">Hacim Top 40</button>
+      <button data-tab="fav">★ Favoriler</button>
+    </div>
+    <ul id="coinList" class="coin-list"><li class="muted pad">Yükleniyor…</li></ul>
+  </aside>
+
+  <section class="main-col">
+    <div class="panel head-panel">
+      <div class="sym-block">
+        <div class="sym-line">
+          <button id="favBtn" class="icon-btn star" title="Favorilere ekle">☆</button>
+          <h1 id="symTitle">BTC/USDT</h1>
+        </div>
+        <div class="price-line">
+          <span id="price" class="price mono">—</span>
+          <span id="change" class="chg mono">—</span>
+        </div>
+        <div class="stats mono" id="stats"></div>
+      </div>
+      <div class="tabs" id="intervalTabs">
+        <button data-iv="15m">15dk</button>
+        <button data-iv="1h" class="active">1s</button>
+        <button data-iv="4h">4s</button>
+        <button data-iv="1d">1g</button>
+      </div>
+    </div>
+
+    <div class="panel chart-panel">
+      <div class="legend" id="legend">
+        <span><i style="background:var(--ema20)"></i>EMA20</span>
+        <span><i style="background:var(--ema50)"></i>EMA50</span>
+        <span><i style="background:var(--ema200)"></i>EMA200</span>
+        <span><i style="background:var(--bb)"></i>Bollinger</span>
+      </div>
+      <div id="chart" class="chart"></div>
+      <div class="sub-label">RSI (14)</div>
+      <div id="rsiChart" class="chart sub"></div>
+      <div class="sub-label">MACD (12, 26, 9)</div>
+      <div id="macdChart" class="chart sub"></div>
+    </div>
+
+    <div class="two">
+      <div class="panel signal-panel">
+        <h2>Teknik Sinyal</h2>
+        <div class="signal-top">
+          <div id="signalBadge" class="badge neutral">—</div>
+          <div class="gauge"><div class="gauge-bar"><div id="gaugeFill" class="gauge-fill"></div><div id="gaugeMark" class="gauge-mark"></div></div>
+            <div class="gauge-labels"><span>Güçlü Sat</span><span>Nötr</span><span>Güçlü Al</span></div></div>
+        </div>
+        <div class="levels mono" id="levels"></div>
+        <ul id="reasons" class="reasons"></ul>
+      </div>
+
+      <div class="panel ai-panel">
+        <div class="ai-head">
+          <h2>Yapay Zeka Yorumu</h2>
+          <button id="aiBtn" class="btn">Yorumla</button>
+        </div>
+        <div id="aiOut" class="ai-out muted">
+          Göstergeler ve son mumlar Claude'a gönderilir, Türkçe yorum döner. Önce <a href="#" id="aiSetupLink">AI Ayarları</a>'ndan kendi API anahtarınızı girin.
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="ai-head">
+        <h2>Sinyal Radarı</h2>
+        <button id="scanBtn" class="btn ghost">Taramayı başlat</button>
+      </div>
+      <p class="muted small-text">Hacimce ilk 20 coin seçili zaman diliminde taranır. Satıra tıklayınca grafiği açılır.</p>
+      <div class="table-wrap">
+        <table class="scan">
+          <thead><tr><th>Coin</th><th>Fiyat</th><th>24s</th><th>RSI</th><th>Skor</th><th>Sinyal</th></tr></thead>
+          <tbody id="scanBody"><tr><td colspan="6" class="muted">Henüz tarama yapılmadı.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap foot muted">
+  Veri: Binance açık API (anahtarsız). Göstergeler tarayıcınızda hesaplanır. AI yorumu: Anthropic Claude (kendi anahtarınızla).
+  · <a href="/">anilkus.github.io</a>
+</footer>
+
+<dialog id="settings">
+  <form method="dialog" class="dlg">
+    <h2>AI Ayarları</h2>
+    <p class="muted small-text">GitHub Pages statik bir site olduğu için anahtarı gizleyecek bir sunucu yok. Anahtarınız <b>yalnızca bu tarayıcının localStorage'ında</b> saklanır ve sadece api.anthropic.com'a gönderilir. Ortak bilgisayarda kullanmayın; harcama limiti düşük ayrı bir anahtar önerilir.</p>
+    <label>Anthropic API anahtarı
+      <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off">
+    </label>
+    <label>Model
+      <select id="model">
+        <option value="claude-opus-5-5">Claude Opus 5.5 (en iyi analiz)</option>
+        <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (hızlı, ucuz)</option>
+        <option value="claude-haiku-5-5">Claude Haiku 5.5 (en ucuz)</option>
+      </select>
+    </label>
+    <p class="muted small-text">Anahtar almak için: <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a></p>
+    <div class="dlg-actions">
+      <button value="clear" id="clearKey" class="btn ghost" type="button">Anahtarı sil</button>
+      <button value="save" id="saveKey" class="btn">Kaydet</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="indicators.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
